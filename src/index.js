@@ -255,7 +255,7 @@ async function callback(env,p){
 export default {
   async fetch(request,env){
     const path=new URL(request.url).pathname;
-    if(request.method==='GET'&&path==='/health')return json({ok:true,service:'ragic-breezysign-worker',version:'1.0.0'});
+    if(request.method==='GET'&&path==='/health')return json({ok:true,service:'ragic-breezysign-worker',version:'1.1.1'});
     if(request.method!=='POST'||!['/start','/sync','/cancel','/callback'].includes(path))return fail('Not Found',404);
     if(!env.WORKER_TOKEN||!env.RAGIC_API_KEY||!env.BREEZYSIGN_API_KEY||!env.RAGIC_TASK_FORM_URL)return fail('Worker 尚未完成環境設定',503);
     if(path!=='/callback'&&!await equalToken(request.headers.get('X-Worker-Token'),env.WORKER_TOKEN))return fail('Unauthorized',401);
