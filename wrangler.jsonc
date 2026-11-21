@@ -1,0 +1,16 @@
+{
+  "name": "ragic-breezysign",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-21",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "vars": {
+    "RAGIC_TASK_FORM_URL": "https://ap12.ragic.com/TruzzDemo/breezysign/3",
+    "BREEZYSIGN_API_URL": "https://app.breezysign.com/pdfbpmn/api/v1/task/"
+  },
+  "ratelimits": [
+    { "name": "RL_ACTION", "namespace_id": "3301", "simple": { "limit": 20, "period": 60 } },
+    { "name": "RL_CALLBACK", "namespace_id": "3302", "simple": { "limit": 30, "period": 60 } },
+    { "name": "RL_GLOBAL", "namespace_id": "3303", "simple": { "limit": 100, "period": 60 } }
+  ]
+}
