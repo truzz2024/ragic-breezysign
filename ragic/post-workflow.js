@@ -81,7 +81,9 @@
     if(!/^https:\/\/[^?#\s]+$/i.test(url)||!token)throw new Error('Worker URL 或驗證金鑰未設定');
     return {url:url,token:token};
   }
-  // 來源報表網址只接受 Ragic 正式網域的單筆記錄，避免把 URL 任意送給下載器。
+  // 將拋轉來源 URL 改為客製列印報表 PDF 網址。
+  // 不限制 *.ragic.com：允許其他正式網域、私有主機、自訂埠。
+  // 只接受 http/https，保留原主機及記錄路徑，移除查詢參數及錨點。
   function reportUrl(e){
     var source=v(e.getFieldValue(F.sourceRecordUrl));
     var templateId=v(e.getFieldValue(F.sourceTemplateId));
@@ -89,10 +91,18 @@
     if(!source||!templateId)throw new Error('自動產生 PDF 需要同時填寫拋轉來源 Ragic URL 及客製列印報表 ID');
     if(!/^[1-9][0-9]*$/.test(templateId))throw new Error('拋轉來源客製列印報表 ID 必須是正整數');
     var clean=source.split('#')[0].split('?')[0].replace(/\/+$/,'');
-    var match=/^https:\/\/([^\/]+)(\/[^?#\s]+)$/i.exec(clean);
-    if(!match||!/(^|\.)ragic\.com$/i.test(match[1])||!/^\/(?:[^\/]+\/){2,}[0-9]+\/[0-9]+$/.test(match[2]))
-      throw new Error('拋轉來源必須是 https://*.ragic.com/.../表單編號/記錄編號 的單筆資料網址');
+    // 這裡只檢查 URL 基本格式，不綁定 Ragic 的官方網域或表單路徑層數。
+    if(!/^https?:\/\/[^\/?#\s]+\/[^?#\s]+$/i.test(clean))
+      throw new Error('拋轉來源必須是包含記錄路徑的完整 http(s) URL');
+    if(/\.carbone$/i.test(clean))clean=clean.slice(0,-8);
     return clean+'.carbone?fileFormat=pdf&ragicCustomPrintTemplateId='+encodeURIComponent(templateId);
+  }
+  // 自訂中文檔名，避免 util.downloadFile() 依原站回應標頭產生 %25E9... 的編碼檔名。
+  // setDownloadFilename() 必須緊接 downloadFile()；回傳的內部檔案識別碼不可自行解碼。
+  function reportFileName(e){
+    var base=v(e.getFieldValue(F.taskName))||v(e.getFieldValue(F.taskNo))||'簽署文件';
+    base=base.replace(/\.pdf$/i,'').replace(/[\\\/:*?"<>|@\x00-\x1f]/g,'_').replace(/^\.+|\.+$/g,'').trim();
+    return (base.slice(0,120)||'簽署文件')+'.pdf';
   }
   // 有手動 PDF 時保留原附件；沒有 PDF 且具備來源資訊才下載並存回表單。
   // 此操作必須在呼叫 Worker /start 前完成，避免簽署到尚未儲存的附件。
@@ -100,6 +110,7 @@
     if(v(e.getFieldValue(F.pdf)))return e;
     var url=reportUrl(e);
     if(!url)return e;
+    util.setDownloadFilename(reportFileName(e)); // 指定中文顯示檔名（僅套用這一次下載）
     var savedFile=util.downloadFile(url);
     if(!v(savedFile))throw new Error('客製列印報表下載沒有回傳檔案名稱；請確認來源表單存取權限及報表 ID');
     e.setFieldValue(F.pdf,v(savedFile));
