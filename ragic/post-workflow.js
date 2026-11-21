@@ -3,7 +3,9 @@
  * TruzzDemo 2026-11-21 欄位定義；部署到其他資料庫時 ID 請重新比對。
  * 1. 只於新增且子表格為空時，將隱藏雙關卡匯入子表格。
  * 2. 發起方式「直接」且任務尚未發起時，由 Ragic 主動呼叫專屬 Worker。
- * 3. 更新入庫時不重複呼叫 Worker；Worker 回寫不能再次觸發本流程。
+ * 3. 若有拋轉來源網址與報表 ID，先將客製列印 PDF 存到待簽署 PDF。
+ * 4. Worker 成功回填 Instance ID 後上鎖該筆記錄。
+ * 5. 更新入庫時不重複呼叫 Worker；Worker 回寫不能再次觸發本流程。
  */
 (function () {
   // ==================== 安裝設定（請先修改此區）====================
@@ -28,6 +30,8 @@
     startMode: 1001461, // 發起方式：直接／手動
     taskName: 1001462, // 任務文件名稱
     pdf: 1001465, // 待簽署 PDF（單一檔案）
+    sourceRecordUrl: 1001511, // 拋轉來源 Ragic URL（原始資料完整網址）
+    sourceTemplateId: 1001512, // 拋轉來源客製列印報表 ID（ragicCustomPrintTemplateId）
     expiry: 1001466, // 文件簽署期限
     schedule: 1001468, // 排程簽署發送時間
     emailSubject: 1001482, // 簽署信件主旨
@@ -77,6 +81,43 @@
     if(!/^https:\/\/[^?#\s]+$/i.test(url)||!token)throw new Error('Worker URL 或驗證金鑰未設定');
     return {url:url,token:token};
   }
+  // 來源報表網址只接受 Ragic 正式網域的單筆記錄，避免把 URL 任意送給下載器。
+  function reportUrl(e){
+    var source=v(e.getFieldValue(F.sourceRecordUrl));
+    var templateId=v(e.getFieldValue(F.sourceTemplateId));
+    if(!source&&!templateId)return '';
+    if(!source||!templateId)throw new Error('自動產生 PDF 需要同時填寫拋轉來源 Ragic URL 及客製列印報表 ID');
+    if(!/^[1-9][0-9]*$/.test(templateId))throw new Error('拋轉來源客製列印報表 ID 必須是正整數');
+    var clean=source.split('#')[0].split('?')[0].replace(/\/+$/,'');
+    var match=/^https:\/\/([^\/]+)(\/[^?#\s]+)$/i.exec(clean);
+    if(!match||!/(^|\.)ragic\.com$/i.test(match[1])||!/^\/(?:[^\/]+\/){2,}[0-9]+\/[0-9]+$/.test(match[2]))
+      throw new Error('拋轉來源必須是 https://*.ragic.com/.../表單編號/記錄編號 的單筆資料網址');
+    return clean+'.carbone?fileFormat=pdf&ragicCustomPrintTemplateId='+encodeURIComponent(templateId);
+  }
+  // 有手動 PDF 時保留原附件；沒有 PDF 且具備來源資訊才下載並存回表單。
+  // 此操作必須在呼叫 Worker /start 前完成，避免簽署到尚未儲存的附件。
+  function ensurePdf(e){
+    if(v(e.getFieldValue(F.pdf)))return e;
+    var url=reportUrl(e);
+    if(!url)return e;
+    var savedFile=util.downloadFile(url);
+    if(!v(savedFile))throw new Error('客製列印報表下載沒有回傳檔案名稱；請確認來源表單存取權限及報表 ID');
+    e.setFieldValue(F.pdf,v(savedFile));
+    e.save();
+    var refreshed=db.getAPIQuery(PATHS.task).getAPIEntry(e.getRootNodeId());
+    if(!refreshed||!v(refreshed.getFieldValue(F.pdf)))throw new Error('客製列印 PDF 未成功寫入待簽署 PDF 欄位');
+    return refreshed;
+  }
+  // 只在好好簽已建立 Instance ID 後上鎖；entry.lock() 會立即鎖定記錄，無需再次 save。
+  function lockAfterStart(id,instanceId){
+    try{
+      var latest=db.getAPIQuery(PATHS.task).getAPIEntry(id);
+      if(!latest||!v(instanceId)||v(latest.getFieldValue(F.instanceId))!==v(instanceId))
+        return '好好簽已回覆建立成功，但 Ragic 任務 ID 尚未確認；請先檢查回寫及上鎖狀態';
+      if(!latest.isLocked())latest.lock();
+      return '';
+    }catch(err){return '好好簽已建立成功，但 Ragic 自動上鎖失敗：'+String(err).slice(0,180);}
+  }
   function sub(e,f,i){return v(e.getSubtableFieldValue(F.subtable,i,String(f)));}
   function payload(e){
     var rows=[];
@@ -120,8 +161,10 @@
         // 已收到 Worker 判定結果，不要在 catch 覆寫成待確認。
         log.info('BreezySign start：'+state+'，'+reason.slice(0,150));
       }else{
-        // Worker 將自行回寫 instanceId；此處不再儲存舊 entry，避免覆蓋回填。
-        log.info('BreezySign start 已送達 Worker：recordId='+e.getRootNodeId());
+        // Worker 先回寫 Instance ID，Ragic 再上鎖；不得儲存舊 entry 覆蓋回填。
+        var lockWarning=lockAfterStart(e.getRootNodeId(),d.instanceId);
+        if(lockWarning)log.info(lockWarning);
+        else log.info('BreezySign 已建立並上鎖：recordId='+e.getRootNodeId());
       }
     }catch(err){
       // 請求逾時或未取得 Worker 的明確回覆，才設為待確認。
@@ -135,8 +178,8 @@
   if(!entry)return;
   if(entry.getSubtableSize(F.subtable)===0){
     var people=[
-      {name:v(entry.getFieldValue(F.P1N)),email:v(entry.getFieldValue(F.P1E)),phone:v(entry.getFieldValue(F.P1P))},
-      {name:v(entry.getFieldValue(F.P2N)),email:v(entry.getFieldValue(F.P2E)),phone:v(entry.getFieldValue(F.P2P))}
+      {name:v(entry.getFieldValue(F.importName1)),email:v(entry.getFieldValue(F.importEmail1)),phone:v(entry.getFieldValue(F.importPhone1))},
+      {name:v(entry.getFieldValue(F.importName2)),email:v(entry.getFieldValue(F.importEmail2)),phone:v(entry.getFieldValue(F.importPhone2))}
     ];
     var seq=0;
     for(var p=0;p<people.length;p++){
@@ -150,11 +193,19 @@
     }
     if(seq>0)entry.save(); // 同張表單預設不重新執行 Post-workflow
   }
-  if(v(entry.getFieldValue(F.startMode))==='直接'){
-    // 重新取回剛寫入的實際子表格 rowId，避免把負數暫存列 ID 傳給 Worker。
-    var saved=db.getAPIQuery(PATHS.task).getAPIEntry(entry.getRootNodeId());
+  // 不論「直接」或「手動」發起，只要來源報表資料完整，就先產生 PDF。
+  // 若建立時下載失敗，可修正來源後按「發起簽署」，由按鈕再次嘗試。
+  var saved=db.getAPIQuery(PATHS.task).getAPIEntry(entry.getRootNodeId());
+  try{saved=ensurePdf(saved);}catch(pdfError){
+    if(saved)setState(saved,'失敗','自動產生 PDF 失敗：'+String(pdfError).slice(0,210));
+    log.info('來源 PDF 產生失敗：'+String(pdfError));
+    return;
+  }
+  if(v(saved.getFieldValue(F.startMode))==='直接'){
+    // 重新取回實際子表格 rowId，避免把負數暫存列 ID 傳給 Worker。
     try{dispatch(saved);}catch(e){
-      if(saved)setState(saved,'失敗',String(e).slice(0,250));
+      var latest=db.getAPIQuery(PATHS.task).getAPIEntry(entry.getRootNodeId());
+      if(latest&&!v(latest.getFieldValue(F.instanceId)))setState(latest,'失敗',String(e).slice(0,250));
       log.info('直接發起前檢查失敗：'+String(e));
     }
   }

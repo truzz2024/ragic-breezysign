@@ -27,6 +27,8 @@ var BreezyModule=(function(){
     status: 1001459, // 簽署狀態（主表單）
     taskName: 1001462, // 任務文件名稱
     pdf: 1001465, // 待簽署 PDF（單一檔案）
+    sourceRecordUrl: 1001511, // 拋轉來源 Ragic URL（原始資料完整網址）
+    sourceTemplateId: 1001512, // 拋轉來源客製列印報表 ID（ragicCustomPrintTemplateId）
     expiry: 1001466, // 文件簽署期限
     schedule: 1001468, // 排程簽署發送時間
     emailSubject: 1001482, // 簽署信件主旨
@@ -68,6 +70,43 @@ var BreezyModule=(function(){
     if(!/^https:\/\/[^?#\s]+$/i.test(url)||!token)throw Error('Worker URL 或驗證金鑰未設定');
     return {url:url,token:token};
   }
+  // 來源報表網址只接受 Ragic 正式網域的單筆記錄，避免把 URL 任意送給下載器。
+  function reportUrl(e){
+    var source=val(e.getFieldValue(F.sourceRecordUrl));
+    var templateId=val(e.getFieldValue(F.sourceTemplateId));
+    if(!source&&!templateId)return '';
+    if(!source||!templateId)throw new Error('自動產生 PDF 需要同時填寫拋轉來源 Ragic URL 及客製列印報表 ID');
+    if(!/^[1-9][0-9]*$/.test(templateId))throw new Error('拋轉來源客製列印報表 ID 必須是正整數');
+    var clean=source.split('#')[0].split('?')[0].replace(/\/+$/,'');
+    var match=/^https:\/\/([^\/]+)(\/[^?#\s]+)$/i.exec(clean);
+    if(!match||!/(^|\.)ragic\.com$/i.test(match[1])||!/^\/(?:[^\/]+\/){2,}[0-9]+\/[0-9]+$/.test(match[2]))
+      throw new Error('拋轉來源必須是 https://*.ragic.com/.../表單編號/記錄編號 的單筆資料網址');
+    return clean+'.carbone?fileFormat=pdf&ragicCustomPrintTemplateId='+encodeURIComponent(templateId);
+  }
+  // 有手動 PDF 時保留原附件；沒有 PDF 且具備來源資訊才下載並存回表單。
+  // 此操作必須在呼叫 Worker /start 前完成，避免簽署到尚未儲存的附件。
+  function ensurePdf(e){
+    if(val(e.getFieldValue(F.pdf)))return e;
+    var url=reportUrl(e);
+    if(!url)return e;
+    var savedFile=util.downloadFile(url);
+    if(!val(savedFile))throw new Error('客製列印報表下載沒有回傳檔案名稱；請確認來源表單存取權限及報表 ID');
+    e.setFieldValue(F.pdf,val(savedFile));
+    e.save();
+    var refreshed=getEntry(e.getRootNodeId());
+    if(!refreshed||!val(refreshed.getFieldValue(F.pdf)))throw new Error('客製列印 PDF 未成功寫入待簽署 PDF 欄位');
+    return refreshed;
+  }
+  // 只在好好簽已建立 Instance ID 後上鎖；entry.lock() 會立即鎖定記錄，無需再次 save。
+  function lockAfterStart(id,instanceId){
+    try{
+      var latest=getEntry(id);
+      if(!latest||!val(instanceId)||val(latest.getFieldValue(F.instanceId))!==val(instanceId))
+        return '好好簽已回覆建立成功，但 Ragic 任務 ID 尚未確認；請先檢查回寫及上鎖狀態';
+      if(!latest.isLocked())latest.lock();
+      return '';
+    }catch(err){return '好好簽已建立成功，但 Ragic 自動上鎖失敗：'+String(err).slice(0,180);}
+  }
   function getSub(e,i,k){return val(e.getSubtableFieldValue(F.subtable,i,String(k)));}
   function makePayload(e){var arr=[];
     for(var i=0;i<e.getSubtableSize(F.subtable);i++){
@@ -100,6 +139,11 @@ var BreezyModule=(function(){
     if(val(e.getFieldValue(F.instanceId)))throw Error('已存在好好簽任務 ID，禁止再次發起');
     var status=val(e.getFieldValue(F.apiStatus));
     if(status==='發起中'||status==='成功'||status==='待確認')throw Error('任務正在發起或結果待確認，不得重複發起');
+    // 缺少附件時，若有拋轉來源則補產 PDF；已存在附件不覆寫。
+    try{e=ensurePdf(e);}catch(pdfError){
+      set(e,'失敗','自動產生 PDF 失敗：'+String(pdfError).slice(0,210));
+      throw pdfError;
+    }
     var p=makePayload(e);
     e.setFieldValue(F.initiatorName,val(user.getUserName()));
     set(e,'發起中','已送交 Worker，等待建立回應');
@@ -115,6 +159,8 @@ var BreezyModule=(function(){
         issue.workerResponseHandled=true;
         throw issue;
       }
+      // 回寫已成功後才將整筆任務上鎖；若權限不足，仍保留已建立的結果。
+      r.lockWarning=lockAfterStart(id,r.instanceId);
       return r;
     }catch(ex){
       if(!ex.workerResponseHandled){
@@ -135,7 +181,10 @@ var BreezyModule=(function(){
   function sync(id){
     var e=getEntry(id),inst=val(e.getFieldValue(F.instanceId));
     if(!inst)throw Error('尚無好好簽任務 ID，無法同步');
-    return request(ROUTES.sync,{recordId:Number(id),instanceId:inst});
+    var result=request(ROUTES.sync,{recordId:Number(id),instanceId:inst});
+    // 若首次發起成功但上鎖失敗，手動同步成功後可再次嘗試上鎖。
+    if(result && result.ok === true)result.lockWarning=lockAfterStart(id,inst);
+    return result;
   }
   return {start:start,cancel:cancel,sync:sync};
 })();
@@ -159,7 +208,7 @@ function breezyAction(action,id,successText) {
   // 不 return Worker 回傳物件，避免 UI 顯示 [object Object]。
 }
 function breezyStart(id) {
-  breezyAction(BreezyModule.start,id,function(){ return '簽署任務已成功發起。'; });
+  breezyAction(BreezyModule.start,id,function(result){ return result.lockWarning ? '簽署任務已成功發起；'+result.lockWarning : '簽署任務已成功發起，資料已上鎖。'; });
 }
 function breezyCancel(id) {
   breezyAction(BreezyModule.cancel,id,function(){ return '簽署任務已成功取消。'; });
@@ -169,6 +218,7 @@ function breezySync(id) {
     var status = result.status ? String(result.status) : '已更新';
     var message = '簽署狀態同步完成：'+status;
     if(result.filesPending && result.filesPending.length) message += '；待補檔案：'+result.filesPending.join('、');
+    if(result.lockWarning)message += '；'+result.lockWarning;
     return message;
   });
 }

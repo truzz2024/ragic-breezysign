@@ -9,6 +9,8 @@
 | `startMode` | 發起方式：直接／手動 | `1001461` | Worker、Ragic Post-workflow |
 | `taskName` | 任務文件名稱 | `1001462` | Worker、Ragic 按鈕、Ragic Post-workflow |
 | `pdf` | 待簽署 PDF（單一檔案） | `1001465` | Worker、Ragic 按鈕、Ragic Post-workflow |
+| `sourceRecordUrl` | 拋轉來源 Ragic URL | `1001511` | Ragic 按鈕、Ragic Post-workflow |
+| `sourceTemplateId` | 拋轉來源客製列印報表 ID | `1001512` | Ragic 按鈕、Ragic Post-workflow |
 | `expiry` | 文件簽署期限 | `1001466` | Worker、Ragic 按鈕、Ragic Post-workflow |
 | `signedPdf` | 已簽署 PDF | `1001467` | Worker |
 | `schedule` | 排程簽署發送時間 | `1001468` | Worker、Ragic 按鈕、Ragic Post-workflow |
@@ -53,3 +55,13 @@
 **另外：**兩份 Ragic JS 的 `SETTING_FIELDS.workerUrl = 1001500`、`SETTING_FIELDS.workerToken = 1001508`，分別是串接設定的 Worker URL 與遮罩金鑰。`PATHS.task`、`PATHS.settings` 是表單路徑設定，Worker 的完整任務表單網址在 `wrangler.jsonc` 的 `RAGIC_TASK_FORM_URL`。
 
 > 特別注意：Ragic Workflow 無法直接 import Cloudflare Worker 的設定檔，三份變數表必須保持一致；附帶的 Node 測試可檢查共用欄位值是否同步。
+
+## 拋轉 PDF 與上鎖規則（Ragic JS V1.2）
+
+- 新增任務時，若 `pdf` 空白且 `sourceRecordUrl`、`sourceTemplateId` 皆有值，透過 `.carbone?fileFormat=pdf&ragicCustomPrintTemplateId=...` 下載報表並將附件寫入 `pdf`。
+- 已有 `pdf` 時絕不覆寫；來源值不完整時顯示錯誤並標記 API 執行狀態「失敗」。
+- 手動發起按鈕會在呼叫 Worker 前再檢查一次 PDF，讓先前失敗的來源可以修正後重試。
+- Worker 成功回寫 Instance ID 才執行 `entry.lock()`；取消或失敗時不自動解鎖；同步成功時也會補嘗試上鎖。
+- 只鎖定**電子簽署任務表單這筆記錄**，不會修改或鎖定原始來源表單。
+- `1001511` 目前接受 `https://*.ragic.com/.../表單編號/記錄編號`，若來源使用自訂網域需另評估放行。
+- Cloudflare Worker 本身沒有變更，`/health` 仍可顯示 `1.1.1`，此為正常現象。

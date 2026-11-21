@@ -15,7 +15,7 @@ function harness(action,result) {
 test('start success is readable Chinese and returns no object',()=>{
   const r=harness('start',{ok:true,instanceId:'id'});
   assert.equal(r.output,undefined); assert.equal(r.status,'SUCCESS');
-  assert.deepEqual(r.messages,['簽署任務已成功發起。']);
+  assert.deepEqual(r.messages,['簽署任務已成功發起，資料已上鎖。']);
 });
 test('sync success has text status and no object string',()=>{
   const r=harness('sync',{ok:true,status:'簽署完成',filesPending:[]});
