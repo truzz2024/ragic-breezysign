@@ -1,3 +1,4 @@
+import { toBreezyCoordinates } from '../src/signature-coordinates.js';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -5,7 +6,7 @@ const text = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
 const start = text.indexOf('function contentsFor(');
 const end = text.indexOf('function stageError(', start);
 assert.ok(start >= 0 && end > start);
-const contentsFor = new Function(text.slice(start, end) + '\nreturn contentsFor;')();
+const contentsFor = new Function('toBreezyCoordinates', text.slice(start, end) + '\nreturn contentsFor;')(toBreezyCoordinates);
 function marker(signer, page) { return {signer,page,box:{x:20*signer,y:50,width:100,height:60}}; }
 test('one signer id = 1, page = 1',()=>{
  const c=contentsFor({matched:[marker(1,1)],unmatched:[]},[{name:'A'}]);

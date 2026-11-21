@@ -1,3 +1,4 @@
+import { toBreezyCoordinates } from '../src/signature-coordinates.js';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -5,7 +6,7 @@ const file = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
 const start = file.indexOf('function contentsFor(');
 const end = file.indexOf('function stageError(', start);
 assert.ok(start >= 0 && end > start, 'contentsFor must exist in src/index.js');
-const contentsFor = new Function(file.slice(start, end) + '\nreturn contentsFor;')();
+const contentsFor = new Function('toBreezyCoordinates', file.slice(start, end) + '\nreturn contentsFor;')(toBreezyCoordinates);
 test('one page PDF with two signers uses page 1, signer ids start at 1', () => {
   const result = contentsFor({ matched: [
     { signer:1, page:1, box:{x:90,y:210,width:160,height:70} },

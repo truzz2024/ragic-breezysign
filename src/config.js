@@ -1,19 +1,51 @@
-// 所有公開模組共用的欄位 ID；不保存任何 API Key。
+/**
+ * Ragic 欄位對照表（Worker 唯一的欄位 ID 定義處）
+ * 安裝到不同資料庫時，請修改下方 ID；不要直接修改 src/index.js 或 src/ragic.js。
+ * 設定表單 1001500/1001508 由 Ragic JS 讀取，不需要在 Worker 內設定。
+ * 已移除的「簽署結果」1001460，以及不使用的發起人帳號 1001488，均不再寫入。
+ */
 export const F = Object.freeze({
-  taskNo: 1001458, status: 1001459, startMode: 1001461,
-  taskName: 1001462, pdf: 1001465, expiry: 1001466,
-  signedPdf: 1001467, schedule: 1001468, trackPdf: 1001469,
-  emailSubject: 1001482, emailMessage: 1001501, overlay: 1001483,
-  sendDone: 1001485, returnUrl: 1001484, orderMode: 1001486,
-  instanceId: 1001487, initiatorName: 1001489, cancelName: 1001509,
-  startTime: 1001491, endTime: 1001492, signUrl: 1001490,
-  apiStatus: 1001497, apiMessage: 1001498, syncedAt: 1001499,
-  subtable: 1001494, signerOrder: 1001470, signerName: 1001471,
-  signerEmail: 1001472, signerPhone: 1001473, signerStatus: 1001474,
-  signerSignedTime: 1001475, signerReason: 1001495,
-  signerFace: 1001477, signerOtp: 1001478,
-  signerHostEmail: 1001479, signerHostName: 1001480,
-  signerCulture: 1001481, signerVideo: 1001496,
+  // ===== 電子簽署任務：主表單 =====
+  taskNo: 1001458, // Ragic 任務編號
+  status: 1001459, // 簽署狀態（主表單）
+  startMode: 1001461, // 發起方式：直接／手動
+  taskName: 1001462, // 任務文件名稱
+  pdf: 1001465, // 待簽署 PDF（單一檔案）
+  expiry: 1001466, // 文件簽署期限
+  signedPdf: 1001467, // 已簽署 PDF
+  schedule: 1001468, // 排程簽署發送時間
+  trackPdf: 1001469, // 簽署軌跡檔案
+  emailSubject: 1001482, // 簽署信件主旨
+  emailMessage: 1001501, // 簽署邀請信訊息內容
+  overlay: 1001483, // 顯示前一人簽署內容
+  sendDone: 1001485, // 寄送完成通知給簽署人
+  returnUrl: 1001484, // 簽署完成後前往網址
+  orderMode: 1001486, // 簽署順序模式：同時／依序
+  instanceId: 1001487, // 好好簽任務 ID
+  initiatorName: 1001489, // 簽署發起人名稱
+  cancelName: 1001509, // 簽署取消人名稱
+  startTime: 1001491, // 任務開始時間
+  endTime: 1001492, // 任務結束時間
+  signUrl: 1001490, // 現場簽署網址
+  apiStatus: 1001497, // API 執行狀態
+  apiMessage: 1001498, // API 訊息
+  syncedAt: 1001499, // API 最後同步時間
+
+  // ===== 簽署關卡子表格 =====
+  subtable: 1001494, // 簽署關卡子表格 Key
+  signerOrder: 1001470, // 簽署順序
+  signerName: 1001471, // 簽署人姓名
+  signerEmail: 1001472, // 簽署人 Email
+  signerPhone: 1001473, // 簽署人手機號碼
+  signerStatus: 1001474, // 簽署人個別狀態
+  signerSignedTime: 1001475, // 簽署時間
+  signerReason: 1001495, // 簽署原因／拒簽原因
+  signerFace: 1001477, // 現場簽署
+  signerOtp: 1001478, // 需要 OTP 驗證
+  signerHostEmail: 1001479, // 現場簽主持人 Email
+  signerHostName: 1001480, // 現場簽主持人姓名
+  signerCulture: 1001481, // 通知語言
+  signerVideo: 1001496, // 需要聲明錄影
 });
 export const MAX_PDF_SIZE = 8 * 1024 * 1024;
 export const BREEZY_API = 'https://app.breezysign.com/pdfbpmn/api/v1/task/';

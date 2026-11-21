@@ -21,7 +21,7 @@ test('其他 API 的錯誤不是 createByPdf 安全拒絕',async()=>{
 });
 test('Ragic 兩份 Workflow 只解除 Worker Token 一欄遮罩',()=>{
   for(const file of ['ragic/action-buttons.js','ragic/post-workflow.js']){
-    assert.match(text(file),/addIgnoreMaskDomain\(1001508\)/);
+    assert.match(text(file),/addIgnoreMaskDomain\(SETTING_FIELDS\.workerToken\)/);
     assert.doesNotMatch(text(file),/setIgnoreAllMasks\(true\)/);
   }
 });
