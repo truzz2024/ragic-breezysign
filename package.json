@@ -1,12 +1,13 @@
 {
   "name": "ragic-breezysign-worker",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.1",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "check": "node --check src/index.js && node --check src/pdf-inspect.js"
+    "check": "node --check src/index.js && node --check src/config.js && node --check src/pdf-inspect.js && node --check src/ragic.js && node --check src/breezy.js && node --check ragic/action-buttons.js && node --check ragic/post-workflow.js",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "pdfjs-serverless": "2.1.0"
