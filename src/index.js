@@ -155,6 +155,13 @@ function signerUpdates(info,record){
   }
   return fields;
 }
+async function verifyStatusWriteback(env,recordId,expected){
+  const actual=await getRecord(env,recordId);
+  const current=str(field(actual,F.status));
+  if(current!==expected){
+    throw new Error('好好簽已回傳「'+expected+'」，但 Ragic 狀態欄位 1001459 回讀仍為「'+(current||'空白')+'」。請檢查 Ragic 欄位唯讀／記錄鎖定／API 金鑰權限及更新回應，勿視為同步成功');
+  }
+}
 async function syncInstance(env,instanceId,recordId=null,callbackStatus='',callbackFinal=false){
   const record=recordId?await getRecord(env,recordId):await findByInstance(env,instanceId);
   if(str(field(record,F.instanceId))!==instanceId)throw Error('Instance ID 與 Ragic 任務不符');
@@ -180,6 +187,7 @@ async function syncInstance(env,instanceId,recordId=null,callbackStatus='',callb
   if(info.endDate)fields[F.endTime]=rDate(info.endDate);
   // 狀態是 getInfo 驗證後的正式資料，先寫回 Ragic，不能被稍後產製的檔案擋住。
   await writeFields(env,rid,fields);
+  await verifyStatusWriteback(env,rid,state);
   let filesUploaded=0;
   const filesPending=[];
   if(state==='簽署完成'){
@@ -236,10 +244,23 @@ async function cancel(env,p){
   if(!inst||!name)throw Error('缺少 Instance ID 或取消人名稱');
   const record=await getRecord(env,id);
   if(str(field(record,F.instanceId))!==inst)throw Error('取消對應的 Instance ID 不符');
-  if(str(field(record,F.status))==='已刪除'||str(field(record,F.cancelName)))throw Error('任務已取消');
+  if(str(field(record,F.status))==='已刪除')throw Error('任務已取消');
   await cancelTask(env,inst);
-  await writeFields(env,id,{[F.status]:'已刪除',[F.cancelName]:name,[F.apiMessage]:'已取消簽署任務',
-    [F.syncedAt]:rDate(new Date().toISOString())});
+  // 避免僅因取消 API 接受請求就宣稱已取消；重新查詢好好簽。
+  // 不預先寫入取消人，否則失敗時會阻擋再次取消。
+  let state='';
+  for(let attempt=0;attempt<3;attempt++){
+    if(attempt)await new Promise(resolve=>setTimeout(resolve,500*attempt));
+    state=taskStatus(await getInfo(env,inst),'');
+    if(state==='已刪除')break;
+  }
+  if(state!=='已刪除'){
+    throw Error('好好簽取消 API 已回應，但重新查詢尚未確認為已刪除（目前：'+state+'）。請稍後按重新取得狀態，不要立即重複取消');
+  }
+  // 先同步正式狀態並確認 Ragic 已持久化，再記錄取消人。
+  const synced=await syncInstance(env,inst,id);
+  if(synced.status!=='已刪除')throw Error('好好簽狀態重新同步後仍未確認為已刪除');
+  await writeFields(env,id,{[F.cancelName]:name,[F.apiMessage]:'已取消簽署任務'});
   return json({ok:true,recordId:id,instanceId:inst,status:'已刪除'});
 }
 async function callback(env,p){
@@ -255,7 +276,7 @@ async function callback(env,p){
 export default {
   async fetch(request,env){
     const path=new URL(request.url).pathname;
-    if(request.method==='GET'&&path==='/health')return json({ok:true,service:'ragic-breezysign-worker',version:'1.1.1'});
+    if(request.method==='GET'&&path==='/health')return json({ok:true,service:'ragic-breezysign-worker',version:'1.0.0'});
     if(request.method!=='POST'||!['/start','/sync','/cancel','/callback'].includes(path))return fail('Not Found',404);
     if(!env.WORKER_TOKEN||!env.RAGIC_API_KEY||!env.BREEZYSIGN_API_KEY||!env.RAGIC_TASK_FORM_URL)return fail('Worker 尚未完成環境設定',503);
     if(path!=='/callback'&&!await equalToken(request.headers.get('X-Worker-Token'),env.WORKER_TOKEN))return fail('Unauthorized',401);
